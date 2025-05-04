@@ -1,0 +1,31 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment folders
+venv/
+.venv/
+env/
+.env/
+*_env/
+env.bak/
+venv.bak/
+
+# IDE/Editor specific folders
+.idea/
+.vscode/
+*.swp
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Project Specific Exclusions
+memory-bank/
+Other Versions/
+OWUI tech-docs/
+identified_issues_and_how_we_fixed_them.md
+rules.md 
+completed_improvements.md 
