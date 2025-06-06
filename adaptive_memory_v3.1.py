@@ -1467,23 +1467,30 @@ Your output must be valid JSON only. No additional text.""",
 
 
         # --- Process Incoming Message ---
-        final_message = None
+        _raw_final_message_content = None
         # 1) Explicit stream=False (non-streaming completion requests)
         if body.get("stream") is False and body.get("messages"):
-            final_message = body["messages"][-1].get("content")
+            if body["messages"]:
+                _raw_final_message_content = body["messages"][-1].get("content")
 
         # 2) Streaming mode – grab final message when "done" flag arrives
         elif body.get("stream") is True and body.get("done", False):
-            final_message = body.get("message", {}).get("content")
+            _raw_final_message_content = body.get("message", {}).get("content")
 
         # 3) Fallback – many WebUI front-ends don't set a "stream" key at all.
-        if final_message is None and body.get("messages"):
-            final_message = body["messages"][-1].get("content")
+        if _raw_final_message_content is None and body.get("messages"):
+            if body["messages"]:
+                _raw_final_message_content = body["messages"][-1].get("content")
+        
+        # Extract text using helper. ensuring we skip any metadata or other non-text content
+        final_message_text = self._extract_text_from_message_content(_raw_final_message_content)
+        logger.debug(f"Inlet: Extracted final_message_text (len {len(final_message_text)}): '{final_message_text[:100]}...'")
+
 
         # --- Command Handling ---
         # Check if the final message is a command before processing memories
-        if final_message and final_message.strip().startswith("/"):
-            command_parts = final_message.strip().split()
+        if final_message_text and final_message_text.strip().startswith("/"):
+            command_parts = final_message_text.strip().split()
             command = command_parts[0].lower()
 
             # --- /memory list_banks Command --- NEW
@@ -1575,8 +1582,8 @@ Your output must be valid JSON only. No additional text.""",
                 # Example: Check for /memory list, /memory forget, etc.
                 # Implement logic similar to assign_bank: parse args, call OWUI functions, emit status
                 # Remember to add command handlers here based on other implemented features
-                logger.info(f"Handling generic /memory command stub for user {user_id}: {final_message}")
-                await self._safe_emit(__event_emitter__, {"type": "info", "content": f"Memory command '{final_message}' received (implementation pending)."})
+                logger.info(f"Handling generic /memory command stub for user {user_id}: {final_message_text}") # Use final_message_text
+                await self._safe_emit(__event_emitter__, {"type": "info", "content": f"Memory command '{final_message_text}' received (implementation pending)."})
                 body["messages"] = []
                 body["prompt"] = "Memory command received." # Placeholder
                 body["bypass_prompt_processing"] = True
@@ -1584,9 +1591,9 @@ Your output must be valid JSON only. No additional text.""",
 
             # --- /note command (Placeholder/Example) ---
             elif command == "/note":
-                 logger.info(f"Handling /note command stub for user {user_id}: {final_message}")
+                 logger.info(f"Handling /note command stub for user {user_id}: {final_message_text}") # Use final_message_text
                  # Implement logic for Feature 6 (Scratchpad)
-                 await self._safe_emit(__event_emitter__, {"type": "info", "content": f"Note command '{final_message}' received (implementation pending)."})
+                 await self._safe_emit(__event_emitter__, {"type": "info", "content": f"Note command '{final_message_text}' received (implementation pending)."})
                  body["messages"] = []
                  body["prompt"] = "Note command received." # Placeholder
                  body["bypass_prompt_processing"] = True
@@ -1598,7 +1605,7 @@ Your output must be valid JSON only. No additional text.""",
                 logger.debug(f"Retrieving relevant memories for user {user_id}")
                 # Use user-specific timezone for relevance calculation context
                 relevant_memories = await self.get_relevant_memories(
-                    current_message=final_message if final_message else "",
+                    current_message=final_message_text if final_message_text else "", # Use final_message_text
                     user_id=user_id,
                     user_timezone=user_valves.timezone # Use user-specific timezone
                 )
@@ -1669,35 +1676,34 @@ Your output must be valid JSON only. No additional text.""",
         user_timezone = user_valves.timezone or self.valves.timezone
 
         # --- BEGIN MEMORY PROCESSING IN OUTLET --- 
-        # Process the *last user message* for memory extraction *after* the LLM response
-        last_user_message_content = None
+        _raw_last_user_message_content = None
         message_history_for_context = []
         try:
-            messages_copy = copy.deepcopy(body_copy.get("messages", []))
-            if messages_copy:
-                 # Find the actual last user message in the history included in the body
-                 for msg in reversed(messages_copy):
+            messages_from_body = body_copy.get("messages", [])
+            if messages_from_body:
+                 # Find the actual last user message in the history included in the body (iterating with index)
+                 for msg_idx in range(len(messages_from_body) - 1, -1, -1):
+                     msg = messages_from_body[msg_idx]
                      if msg.get("role") == "user" and msg.get("content"):
-                         last_user_message_content = msg.get("content")
+                         _raw_last_user_message_content = msg.get("content")
+                         # Get up to N messages *before* the last user message for context
+                         start_index = max(0, msg_idx - self.valves.recent_messages_n)
+                         # Ensure history doesn't include the current user message itself
+                         message_history_for_context = messages_from_body[start_index:msg_idx] 
                          break
-                 # Get up to N messages *before* the last user message for context
-                 if last_user_message_content:
-                     user_msg_index = -1
-                     for i, msg in enumerate(messages_copy):
-                         if msg.get("role") == "user" and msg.get("content") == last_user_message_content:
-                             user_msg_index = i
-                             break
-                     if user_msg_index != -1:
-                         start_index = max(0, user_msg_index - self.valves.recent_messages_n)
-                         message_history_for_context = messages_copy[start_index:user_msg_index]
+            
+            # Extract text using the new helper
+            last_user_message_text = self._extract_text_from_message_content(_raw_last_user_message_content)
+            logger.debug(f"Outlet: Extracted last_user_message_text (len {len(last_user_message_text)}): '{last_user_message_text[:100]}...'")
 
-            if last_user_message_content:
-                 logger.info(f"Starting memory processing in outlet for user message: {last_user_message_content[:60]}...")
+            # Process only if there's text content
+            if last_user_message_text: 
+                 logger.info(f"Starting memory processing in outlet for user message: {last_user_message_text[:60]}...")
                  # Use asyncio.create_task for non-blocking processing
                  # Reload valves inside _process_user_memories ensures latest config
                  memory_task = asyncio.create_task(
                      self._process_user_memories(
-                         user_message=last_user_message_content,
+                         user_message=last_user_message_text,
                          user_id=user_id,
                          event_emitter=__event_emitter__,
                          show_status=user_valves.show_status, # Still show status if user wants
@@ -1708,7 +1714,7 @@ Your output must be valid JSON only. No additional text.""",
                  # Optional: Add callback or handle task completion if needed, but allow it to run in background
                  # memory_task.add_done_callback(lambda t: logger.info(f"Outlet memory task finished: {t.result()}"))
             else:
-                 logger.warning("Could not find last user message in outlet body to process for memories.")
+                 logger.warning("Could not find last user message text in outlet body to process for memories.")
 
         except Exception as e:
             logger.error(f"Error initiating memory processing in outlet: {e}\n{traceback.format_exc()}")
@@ -1718,7 +1724,7 @@ Your output must be valid JSON only. No additional text.""",
         try:
             # Get relevant memories for context injection on next interaction
             memories = await self.get_relevant_memories(
-                current_message=last_user_message_content or "", # Use the variable holding the user message
+                current_message=last_user_message_text or "", # Use the variable holding the user message text
                 user_id=user_id,
                 user_timezone=user_timezone,
             )
@@ -2783,6 +2789,22 @@ Produce ONLY the JSON array output for the user message above, adhering strictly
             return False
 
         return True
+    
+    def _extract_text_from_message_content(self, content: Union[str, List[Dict[str, Any]]]) -> str:
+        """
+        Extracts and concatenates text from a message content,
+        which can be a string or a list (for multimodal messages).
+        """
+        if isinstance(content, str):
+            return content
+        elif isinstance(content, list):
+            text_parts = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
+                    text_parts.append(item["text"])
+            return " ".join(text_parts) # Concatenate text parts with a space
+        logger.warning(f"Unexpected content type for text extraction: {type(content)}. Returning empty string.")
+        return "" # Fallback for unexpected types or if no text is found
 
     def _extract_and_parse_json(self, text: str) -> Union[List, Dict, None]:
         """Extracts JSON object or array from text, trying various methods."""
