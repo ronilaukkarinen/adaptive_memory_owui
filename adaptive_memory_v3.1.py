@@ -1,3 +1,12 @@
+"""
+title: Adaptive Memory v3.1 - Advanced Memory System for OpenWebUI
+author: AG (original), improved by gramanoid, ronilaukkarinen
+description: Adaptive Memory is a sophisticated plugin that provides persistent, personalized memory capabilities for Large Language Models (LLMs) within OpenWebUI.
+repository_url: https://github.com/gramanoid/adaptive_memory_owui
+version: 3.1.0
+required_open_webui_version: >= 0.5.0
+"""
+
 import json
 import copy  # Add deepcopy import
 import traceback
@@ -169,7 +178,7 @@ class Filter:
             default=7200,  # 2 hours performance setting
             description="Interval in seconds between memory summarization runs"
         )
-        
+
         enable_error_logging_task: bool = Field(
             default=True,
             description="Enable or disable the background error counter logging task"
@@ -178,7 +187,7 @@ class Filter:
             default=1800,  # 30 minutes performance setting
             description="Interval in seconds between error counter log entries"
         )
-        
+
         enable_date_update_task: bool = Field(
             default=True,
             description="Enable or disable the background date update task"
@@ -187,7 +196,7 @@ class Filter:
             default=3600,  # 1 hour performance setting
             description="Interval in seconds between date information updates"
         )
-        
+
         enable_model_discovery_task: bool = Field(
             default=True,
             description="Enable or disable the background model discovery task"
@@ -197,7 +206,7 @@ class Filter:
             description="Interval in seconds between model discovery runs"
         )
         # ------ End Background Task Management Configuration ------
-        
+
         # ------ Begin Summarization Configuration ------
         summarization_min_cluster_size: int = Field(
             default=3,
@@ -253,7 +262,7 @@ Analyze the following related memories and provide a concise summary.""",
             description="System prompt for summarizing clusters of related memories"
         )
         # ------ End Summarization Configuration ------
-        
+
         # ------ Begin Filtering & Saving Configuration ------
         enable_json_stripping: bool = Field(
             default=True,
@@ -477,8 +486,8 @@ Analyze the following related memories and provide a concise summary.""",
             default='''You are an automated JSON data extraction system. Your ONLY function is to identify user-specific, persistent facts, preferences, goals, relationships, or interests from the user's messages and output them STRICTLY as a JSON array of operations.
 
 **ABSOLUTE OUTPUT REQUIREMENT: FAILURE TO COMPLY WILL BREAK THE SYSTEM.**
-1.  Your **ENTIRE** response **MUST** be **ONLY** a valid JSON array starting with `[` and ending with `]`. 
-2.  **NO EXTRA TEXT**: Do **NOT** include **ANY** text, explanations, greetings, apologies, notes, or markdown formatting (like ```json) before or after the JSON array. 
+1.  Your **ENTIRE** response **MUST** be **ONLY** a valid JSON array starting with `[` and ending with `]`.
+2.  **NO EXTRA TEXT**: Do **NOT** include **ANY** text, explanations, greetings, apologies, notes, or markdown formatting (like ```json) before or after the JSON array.
 3.  **ARRAY ALWAYS**: Even if you find only one memory, it **MUST** be enclosed in an array: `[{"operation": ...}]`. Do **NOT** output a single JSON object `{...}`.
 4.  **EMPTY ARRAY**: If NO relevant user-specific memories are found, output **ONLY** an empty JSON array: `[]`.
 
@@ -634,7 +643,7 @@ Your output must be valid JSON only. No additional text.""",
             if not isinstance(v, float) or v < 0.0:
                 raise ValueError(f"{info.field_name} must be a non-negative float")
             return v
-        
+
         @field_validator('timezone')
         def check_valid_timezone(cls, v):
             try:
@@ -807,7 +816,7 @@ Your output must be valid JSON only. No additional text.""",
             "json_parse_errors": 0,
             "memory_crud_errors": 0,
         }
-        
+
         # Log configuration for deduplication, helpful for testing and validation
         logger.debug(f"Memory deduplication settings:")
         logger.debug(f"  - deduplicate_memories: {self.valves.deduplicate_memories}")
@@ -919,7 +928,7 @@ Your output must be valid JSON only. No additional text.""",
                 eligible_memories.append(mem)
             else:
                 processed_ids.add(mem.get("id")) # Mark young memories as processed
-        
+
         logger.debug(f"Summarization: Found {len(eligible_memories)} memories older than {min_age_days} days.")
 
         if not eligible_memories:
@@ -944,7 +953,7 @@ Your output must be valid JSON only. No additional text.""",
                     except Exception as e:
                         logger.warning(f"Failed to generate embedding for memory {mem_id} during clustering: {e}")
                         self.memory_embeddings[mem_id] = None # Mark as failed
-            
+
             # Simple greedy clustering based on similarity
             temp_eligible = eligible_memories[:] # Work with a copy
             while temp_eligible:
@@ -952,26 +961,26 @@ Your output must be valid JSON only. No additional text.""",
                 current_id = current_mem.get("id")
                 if current_id in processed_ids:
                     continue
-                
+
                 current_emb = self.memory_embeddings.get(current_id)
                 if current_emb is None:
                     processed_ids.add(current_id)
                     continue # Skip if no embedding
-                    
+
                 cluster = [current_mem]
                 processed_ids.add(current_id)
-                
+
                 remaining_after_pop = []
                 for other_mem in temp_eligible:
                     other_id = other_mem.get("id")
                     if other_id in processed_ids:
                         continue
-                        
+
                     other_emb = self.memory_embeddings.get(other_id)
                     if other_emb is None:
                          remaining_after_pop.append(other_mem)
                          continue # Skip if no embedding
-                         
+
                     # Calculate similarity
                     try:
                         similarity = float(np.dot(current_emb, other_emb))
@@ -983,9 +992,9 @@ Your output must be valid JSON only. No additional text.""",
                     except Exception as e:
                        logger.warning(f"Error comparing embeddings for {current_id} and {other_id}: {e}")
                        remaining_after_pop.append(other_mem)
-                
+
                 temp_eligible = remaining_after_pop # Update list for next outer loop iteration
-                
+
                 if len(cluster) >= self.valves.summarization_min_cluster_size:
                     embedding_clusters.append(cluster)
                     logger.debug(f"Found embedding cluster of size {len(cluster)} starting with ID {current_id}")
@@ -993,28 +1002,28 @@ Your output must be valid JSON only. No additional text.""",
             # If strategy is only embeddings, return now
             if strategy == "embeddings":
                  return embedding_clusters
-        
+
         # --- Tag Clustering --- (Only if strategy is 'tags' or 'hybrid')
         tag_clusters = []
         if strategy in ["tags", "hybrid"]:
             logger.debug(f"Clustering eligible memories using tags...")
             from collections import defaultdict
             tag_map = defaultdict(list)
-            
+
             # Group memories by tag
             for mem in eligible_memories:
                 mem_id = mem.get("id")
                 # Skip if already clustered by embeddings in hybrid mode
                 if strategy == "hybrid" and mem_id in processed_ids:
                      continue
-                     
+
                 content = mem.get("memory", "")
                 tags_match = re.match(r"\[Tags: (.*?)\]", content)
                 if tags_match:
                     tags = [tag.strip() for tag in tags_match.group(1).split(",")]
                     for tag in tags:
                         tag_map[tag].append(mem)
-            
+
             # Create clusters from tag groups
             cluster_candidates = list(tag_map.values())
             for candidate in cluster_candidates:
@@ -1029,14 +1038,14 @@ Your output must be valid JSON only. No additional text.""",
             logger.debug(f"Identified {len(tag_clusters)} potential clusters via tags.")
             if strategy == "tags":
                  return tag_clusters
-        
-        # --- Hybrid Strategy: Combine and return --- 
+
+        # --- Hybrid Strategy: Combine and return ---
         if strategy == "hybrid":
              # Simply concatenate the lists of clusters found by each method
              logger.debug(f"Combining {len(embedding_clusters)} embedding clusters and {len(tag_clusters)} tag clusters for hybrid strategy.")
              all_clusters = embedding_clusters + tag_clusters
              return all_clusters
-        
+
         # Should not be reached if strategy is valid, but return empty list as fallback
         return []
 
@@ -1049,7 +1058,7 @@ Your output must be valid JSON only. No additional text.""",
                 interval = self.valves.summarization_interval * jitter
                 await asyncio.sleep(interval)
                 logger.info("Starting periodic memory summarization run...")
-                
+
                 try:
                     # Fetch all users (or handle single user case)
                     # For now, assuming single user for simplicity, adapt if multi-user support needed
@@ -1058,24 +1067,24 @@ Your output must be valid JSON only. No additional text.""",
                     if not user_obj:
                         logger.warning(f"Summarization skipped: User '{user_id}' not found.")
                         continue
-                    
+
                     # Get all memories for the user
                     all_user_memories = await self._get_formatted_memories(user_id)
                     if len(all_user_memories) < self.valves.summarization_min_cluster_size:
                          logger.info(f"Summarization skipped: Not enough memories for user '{user_id}' to form a cluster.")
                          continue
-                         
+
                     logger.debug(f"Retrieved {len(all_user_memories)} total memories for user '{user_id}' for summarization.")
-                    
+
                     # Find clusters of related, old memories
                     memory_clusters = await self._find_memory_clusters(all_user_memories)
-                    
+
                     if not memory_clusters:
                         logger.info(f"No eligible memory clusters found for user '{user_id}' for summarization.")
                         continue
-                    
+
                     logger.info(f"Found {len(memory_clusters)} memory clusters to potentially summarize for user '{user_id}'.")
-                    
+
                     # Process each cluster
                     summarized_count = 0
                     deleted_count = 0
@@ -1083,7 +1092,7 @@ Your output must be valid JSON only. No additional text.""",
                         # Ensure cluster still meets minimum size after potential filtering in _find_memory_clusters
                         if len(cluster) < self.valves.summarization_min_cluster_size:
                             continue
-                        
+
                         # Limit cluster size for the LLM call
                         cluster_to_summarize = cluster[:self.valves.summarization_max_cluster_size]
                         logger.debug(f"Attempting to summarize cluster of size {len(cluster_to_summarize)} (max: {self.valves.summarization_max_cluster_size}).")
@@ -1101,7 +1110,7 @@ Your output must be valid JSON only. No additional text.""",
                         logger.debug(f"Calling LLM to summarize cluster. System prompt length: {len(system_prompt)}, User prompt length: {len(user_prompt)}")
                         summary = await self.query_llm_with_retry(system_prompt, user_prompt)
 
-                        if summary and not summary.startswith("Error:"):                            
+                        if summary and not summary.startswith("Error:"):
                             # Format summary with tags (e.g., from the first memory in cluster? Or generate new ones?)
                             # For simplicity, let's try inheriting tags from the *first* memory in the sorted cluster
                             first_mem_content = cluster_to_summarize[0].get("memory", "")
@@ -1109,15 +1118,15 @@ Your output must be valid JSON only. No additional text.""",
                             tags_match = re.match(r"\[Tags: (.*?)\]", first_mem_content)
                             if tags_match:
                                 tags = [tag.strip() for tag in tags_match.group(1).split(",")]
-                            
+
                             # Add a specific "summarized" tag
                             if "summarized" not in tags:
                                 tags.append("summarized")
-                                
+
                             formatted_summary = f"[Tags: {', '.join(tags)}] {summary.strip()}"
-                            
+
                             logger.info(f"Generated summary for cluster: {formatted_summary[:100]}...")
-                            
+
                             # Save summary as new memory
                             try:
                                 new_mem_op = MemoryOperation(operation="NEW", content=formatted_summary, tags=tags)
@@ -1126,7 +1135,7 @@ Your output must be valid JSON only. No additional text.""",
                             except Exception as add_err:
                                 logger.error(f"Failed to save summary memory: {add_err}")
                                 continue # Skip deleting originals if saving summary fails
-                            
+
                             # Delete original memories in the summarized cluster
                             for mem_to_delete in cluster_to_summarize:
                                 try:
@@ -1144,7 +1153,7 @@ Your output must be valid JSON only. No additional text.""",
                         logger.info(f"Successfully generated {summarized_count} summaries and deleted {deleted_count} original memories for user '{user_id}'.")
                     else:
                         logger.info(f"No summaries were generated in this run for user '{user_id}'.")
-                        
+
                 except Exception as e:
                     logger.error(f"Error in summarization loop for a user: {e}\n{traceback.format_exc()}")
                     # Continue loop even if one user fails
@@ -1174,7 +1183,7 @@ Your output must be valid JSON only. No additional text.""",
                 jitter = random.uniform(0.9, 1.1)  # ±10% randomization
                 interval = self.valves.error_logging_interval * jitter
                 await asyncio.sleep(interval)
-                
+
                 # Determine logging behaviour based on valve settings
                 if self.valves.debug_error_counter_logs:
                     # Verbose debug logging – every interval
@@ -1201,9 +1210,9 @@ Your output must be valid JSON only. No additional text.""",
                     # Let's refine this: Add timestamp whenever the error counter increments.
                     # We need to modify where the counter is incremented.
 
-                    # --- Revised approach: Use a deque to store timestamps of recent errors --- 
+                    # --- Revised approach: Use a deque to store timestamps of recent errors ---
                     timestamps = self.error_timestamps[error_type]
-                    
+
                     # Remove old timestamps outside the window
                     while timestamps and timestamps[0] < now - window:
                         timestamps.popleft()
@@ -1246,7 +1255,7 @@ Your output must be valid JSON only. No additional text.""",
                     jitter = random.uniform(0.9, 1.1)  # ±10% randomization
                     interval = self.valves.date_update_interval * jitter
                     await asyncio.sleep(interval)
-                    
+
                     self.current_date = self.get_formatted_datetime()
                     self.date_info = self._update_date_info()
                     logger.debug(f"Updated date information: {self.date_info}")
@@ -1270,7 +1279,7 @@ Your output must be valid JSON only. No additional text.""",
                     try:
                         # Discover models
                         await self._discover_models()
-                        
+
                         # Use configurable interval with small random jitter
                         jitter = random.uniform(0.9, 1.1)  # ±10% randomization
                         interval = self.valves.model_discovery_interval * jitter
@@ -1481,7 +1490,7 @@ Your output must be valid JSON only. No additional text.""",
         if _raw_final_message_content is None and body.get("messages"):
             if body["messages"]:
                 _raw_final_message_content = body["messages"][-1].get("content")
-        
+
         # Extract text using helper. ensuring we skip any metadata or other non-text content
         final_message_text = self._extract_text_from_message_content(_raw_final_message_content)
         logger.debug(f"Inlet: Extracted final_message_text (len {len(final_message_text)}): '{final_message_text[:100]}...'")
@@ -1675,7 +1684,7 @@ Your output must be valid JSON only. No additional text.""",
         # Get user's timezone if set
         user_timezone = user_valves.timezone or self.valves.timezone
 
-        # --- BEGIN MEMORY PROCESSING IN OUTLET --- 
+        # --- BEGIN MEMORY PROCESSING IN OUTLET ---
         _raw_last_user_message_content = None
         message_history_for_context = []
         try:
@@ -1689,15 +1698,15 @@ Your output must be valid JSON only. No additional text.""",
                          # Get up to N messages *before* the last user message for context
                          start_index = max(0, msg_idx - self.valves.recent_messages_n)
                          # Ensure history doesn't include the current user message itself
-                         message_history_for_context = messages_from_body[start_index:msg_idx] 
+                         message_history_for_context = messages_from_body[start_index:msg_idx]
                          break
-            
+
             # Extract text using the new helper
             last_user_message_text = self._extract_text_from_message_content(_raw_last_user_message_content)
             logger.debug(f"Outlet: Extracted last_user_message_text (len {len(last_user_message_text)}): '{last_user_message_text[:100]}...'")
 
             # Process only if there's text content
-            if last_user_message_text: 
+            if last_user_message_text:
                  logger.info(f"Starting memory processing in outlet for user message: {last_user_message_text[:60]}...")
                  # Use asyncio.create_task for non-blocking processing
                  # Reload valves inside _process_user_memories ensures latest config
@@ -1718,7 +1727,7 @@ Your output must be valid JSON only. No additional text.""",
 
         except Exception as e:
             logger.error(f"Error initiating memory processing in outlet: {e}\n{traceback.format_exc()}")
-        # --- END MEMORY PROCESSING IN OUTLET --- 
+        # --- END MEMORY PROCESSING IN OUTLET ---
 
         # Process the response content for injecting memories
         try:
@@ -1944,7 +1953,7 @@ Your output must be valid JSON only. No additional text.""",
         # --- ADD LOGGING TO INSPECT self.config ---
         config_content = getattr(self, "config", "<Not Set>")
         logger.info(f"Inspecting self.config at start of _process_user_memories: {config_content}")
-        # --- END LOGGING --- 
+        # --- END LOGGING ---
 
         # Start timer
         start_time = time.perf_counter()
@@ -2194,7 +2203,7 @@ Your output must be valid JSON only. No additional text.""",
             else:
                 low_confidence_discarded += 1
                 logger.debug(f"Discarding memory due to low confidence ({confidence_score:.2f} < {min_conf}): {str(mem.get('content', ''))[:50]}...")
-        
+
         # Emit status message if any memories were discarded due to low confidence
         if low_confidence_discarded > 0 and show_status:
             await self._safe_emit(
@@ -2207,7 +2216,7 @@ Your output must be valid JSON only. No additional text.""",
                     },
                 },
             )
-        
+
         # Use the confidence-filtered list for subsequent processing
         filtered_memories = memories_passing_confidence
         # --- END NEW ---
@@ -2290,25 +2299,25 @@ Your output must be valid JSON only. No additional text.""",
             max_memories = self.valves.max_total_memories
             current_count = len(current_memories_data)
             new_count = len(filtered_memories) # Only count NEW operations towards limit for pruning decision
-            
+
             if current_count + new_count > max_memories:
                 to_remove = current_count + new_count - max_memories
                 logger.info(
                     f"Memory limit ({max_memories}) would be exceeded. Need to prune {to_remove} memories."
                 )
-                
+
                 memories_to_prune_ids = []
-                
+
                 # Choose pruning strategy based on valve
                 strategy = self.valves.pruning_strategy
                 logger.info(f"Applying pruning strategy: {strategy}")
-                
+
                 if strategy == "least_relevant":
                     try:
                         # Calculate relevance for all existing memories against the current user message
                         memories_with_relevance = []
                         # Re-use logic similar to get_relevant_memories but for *all* memories
-                        
+
                         user_embedding = None
                         if self._local_embedding_model:
                             try:
@@ -2320,7 +2329,7 @@ Your output must be valid JSON only. No additional text.""",
                         can_use_vectors = user_embedding is not None
                         needs_llm = self.valves.use_llm_for_relevance
 
-                        # --- Calculate Scores --- 
+                        # --- Calculate Scores ---
                         if not needs_llm and can_use_vectors:
                              # Vector-only relevance calculation
                             for mem_data in current_memories_data:
@@ -2336,7 +2345,7 @@ Your output must be valid JSON only. No additional text.""",
                                     except Exception as e:
                                         logger.warning(f"Failed to compute embedding for existing memory {mem_id}: {e}")
                                         mem_emb = None # Mark as failed
-                                
+
                                 if mem_emb is not None:
                                     sim_score = float(np.dot(user_embedding, mem_emb))
                                     memories_with_relevance.append({"id": mem_id, "relevance": sim_score})
@@ -2347,7 +2356,7 @@ Your output must be valid JSON only. No additional text.""",
                             # LLM-based relevance calculation (simplified, no caching needed here)
                             # Prepare memories for LLM prompt
                             memory_strings_for_llm = [
-                                f"ID: {mem['id']}, CONTENT: {mem['memory']}" 
+                                f"ID: {mem['id']}, CONTENT: {mem['memory']}"
                                 for mem in current_memories_data
                             ]
                             system_prompt = self.valves.memory_relevance_prompt
@@ -2357,11 +2366,11 @@ Available memories:
 {json.dumps(memory_strings_for_llm)}
 
 Rate the relevance of EACH memory to the current user message."""
-                            
+
                             try:
                                 llm_response_text = await self.query_llm_with_retry(system_prompt, llm_user_prompt)
                                 llm_relevance_results = self._extract_and_parse_json(llm_response_text)
-                                
+
                                 if isinstance(llm_relevance_results, list):
                                     # Map results back to IDs
                                     llm_scores = {item.get("id"): item.get("relevance", 0.0) for item in llm_relevance_results if isinstance(item, dict)}
@@ -2380,26 +2389,26 @@ Rate the relevance of EACH memory to the current user message."""
                              logger.warning("Cannot determine relevance for pruning (no embeddings/LLM). Pruning will be FIFO-like.")
                              memories_with_relevance = [{"id": m["id"], "relevance": 0.0} for m in current_memories_data]
 
-                        # --- Sort and Select for Pruning ---                     
+                        # --- Sort and Select for Pruning ---
                         # Sort by relevance ascending (lowest first)
                         memories_with_relevance.sort(key=lambda x: x.get("relevance", 0.0))
-                        
+
                         # Select the IDs of the least relevant memories to remove (take the first `to_remove` items after sorting)
                         memories_to_prune_ids = [mem["id"] for mem in memories_with_relevance[:to_remove]]
                         logger.info(f"Identified {len(memories_to_prune_ids)} least relevant memories for pruning.")
-                        
+
                     except Exception as relevance_err:
                         logger.error(f"Error calculating relevance for pruning, falling back to FIFO: {relevance_err}")
                         # Fallback to FIFO on any error during relevance calculation
                         strategy = "fifo"
-                        
+
                 # Default or fallback FIFO strategy
                 if strategy == "fifo":
                     # Sort by timestamp ascending (oldest first)
                     # Make sure timestamp exists, fallback to a very old date if not
                     default_date = datetime.min.replace(tzinfo=timezone.utc)
                     sorted_memories = sorted(
-                        current_memories_data, 
+                        current_memories_data,
                         key=lambda x: x.get("created_at", default_date)
                     )
                     memories_to_prune_ids = [mem["id"] for mem in sorted_memories[:to_remove]]
@@ -2418,7 +2427,7 @@ Rate the relevance of EACH memory to the current user message."""
                     logger.info(f"Successfully pruned {pruned_count} memories.")
                 else:
                     logger.warning("Pruning needed but no memory IDs identified for deletion.")
-                    
+
         except Exception as e:
             logger.error(
                 f"Error handling max_total_memories: {e}\n{traceback.format_exc()}"
@@ -2789,7 +2798,7 @@ Produce ONLY the JSON array output for the user message above, adhering strictly
             return False
 
         return True
-    
+
     def _extract_text_from_message_content(self, content: Union[str, List[Dict[str, Any]]]) -> str:
         """
         Extracts and concatenates text from a message content,
@@ -2949,44 +2958,44 @@ Produce ONLY the JSON array output for the user message above, adhering strictly
         combined_similarity = (0.4 * jaccard) + (0.6 * seq_similarity)
 
         return combined_similarity
-        
+
     async def _calculate_embedding_similarity(self, memory1: str, memory2: str) -> float:
         """
         Calculate semantic similarity between two memory contents using embeddings.
         Returns a score between 0.0 (completely different) and 1.0 (identical).
-        
+
         This method uses the configured embedding provider (local or API)
         and calculates cosine similarity for more accurate semantic matching.
         """
         if not memory1 or not memory2:
             return 0.0
-            
+
         # Clean the memories - remove tags and normalize
         memory1_clean = re.sub(r"\[Tags:.*?\]\\s*", "", memory1).lower().strip()
         memory2_clean = re.sub(r"\[Tags:.*?\]\\s*", "", memory2).lower().strip()
-        
+
         # Handle exact matches quickly
         if memory1_clean == memory2_clean:
             return 1.0
-            
+
         try:
             # Get embeddings using the main dispatcher function
             mem1_embedding = await self._get_embedding(memory1_clean)
             mem2_embedding = await self._get_embedding(memory2_clean)
-            
+
             # Check if embeddings were successfully generated
             if mem1_embedding is None or mem2_embedding is None:
                 logger.warning("Could not generate embeddings for similarity calculation. Falling back to text-based similarity.")
                 # Fallback to text-based on failure
                 return self._calculate_memory_similarity(memory1, memory2)
-            
+
             # Calculate cosine similarity (dot product of normalized vectors)
             # _get_embedding should return normalized vectors
             similarity = float(np.dot(mem1_embedding, mem2_embedding))
-            
+
             # Clamp similarity to [0, 1] just in case of float precision issues
             similarity = max(0.0, min(1.0, similarity))
-            
+
             return similarity
         except Exception as e:
             logger.error(f"Error calculating embedding similarity: {e}\n{traceback.format_exc()}")
@@ -3451,7 +3460,7 @@ Current datetime: {current_datetime.strftime('%A, %B %d, %Y %H:%M:%S')} ({curren
                                 similarity = self._calculate_memory_similarity(
                                     formatted_content, existing_content
                                 )
-                                
+
                             if similarity >= threshold_to_use:
                                 logger.debug(
                                     f"  -> Duplicate found vs existing mem {existing_idx} (Similarity: {similarity_score:.3f}, Method: {similarity_method}, Threshold: {threshold_to_use})"
@@ -3680,7 +3689,7 @@ Current datetime: {current_datetime.strftime('%A, %B %d, %Y %H:%M:%S')} ({curren
             String response from LLM or error message
         """
         # Get configuration from valves
-        provider_type = self.valves.llm_provider_type 
+        provider_type = self.valves.llm_provider_type
         model = self.valves.llm_model_name
         api_url = self.valves.llm_api_endpoint_url
         api_key = self.valves.llm_api_key
@@ -3977,7 +3986,7 @@ Current datetime: {current_datetime.strftime('%A, %B %d, %Y %H:%M:%S')} ({curren
     async def cleanup(self):
         """Clean up resources when filter is being shut down"""
         logger.info("Cleaning up Adaptive Memory Filter")
-        
+
         # Cancel all background tasks
         for task in self._background_tasks:
             if not task.done() and not task.cancelled():
@@ -3989,18 +3998,18 @@ Current datetime: {current_datetime.strftime('%A, %B %d, %Y %H:%M:%S')} ({curren
                     pass
                 except Exception as e:
                     logger.error(f"Error while cancelling task: {e}")
-        
+
         # Clear task tracking set
         self._background_tasks.clear()
-        
+
         # Close any open sessions
         if self._aiohttp_session and not self._aiohttp_session.closed:
             await self._aiohttp_session.close()
-            
+
         # Clear memory caches to help with GC
         self._memory_embeddings = {}
         self._relevance_cache = {}
-        
+
         logger.info("Adaptive Memory Filter cleanup complete")
 
     def _convert_dict_to_memory_operations(
@@ -4035,7 +4044,7 @@ Current datetime: {current_datetime.strftime('%A, %B %d, %Y %H:%M:%S')} ({curren
                         )  # Check common content keys
                         tags = item.get("tags", [])
                         memory_bank = item.get("memory_bank", self.valves.default_memory_bank)
-                        
+
                         # Validate memory_bank
                         if memory_bank not in self.valves.allowed_memory_banks:
                             memory_bank = self.valves.default_memory_bank
@@ -4056,8 +4065,8 @@ Current datetime: {current_datetime.strftime('%A, %B %d, %Y %H:%M:%S')} ({curren
                         if content not in seen_content:
                             operations.append(
                                 {
-                                    "operation": op, 
-                                    "content": content, 
+                                    "operation": op,
+                                    "content": content,
                                     "tags": tags,
                                     "memory_bank": memory_bank
                                 }
@@ -4108,7 +4117,7 @@ Current datetime: {current_datetime.strftime('%A, %B %d, %Y %H:%M:%S')} ({curren
                         tag = "goal"
                     elif lowered_key in relationship_keys:
                         tag = "relationship"
-                    
+
                     # Simple bank inference
                     memory_bank = self.valves.default_memory_bank
                     if lowered_key in work_keys:
@@ -4259,7 +4268,7 @@ Current datetime: {current_datetime.strftime('%A, %B %d, %Y %H:%M:%S')} ({curren
                 logger.error(f"Unexpected error getting embedding from API: {e}\n{traceback.format_exc()}")
                 # Don't retry on unexpected errors during parsing/processing
                 return None # Return None on unexpected error
-        
+
         logger.error(f"Embedding API query failed after {max_retries + 1} attempts.")
         return None
 
@@ -4270,7 +4279,7 @@ Current datetime: {current_datetime.strftime('%A, %B %d, %Y %H:%M:%S')} ({curren
         _embed_start = time.perf_counter()
         """Primary function to get embedding, uses local or API based on valves."""
         provider_type = self.valves.embedding_provider_type
-        
+
         if not text:
             logger.debug("Skipping embedding for empty text.")
             return None
@@ -4287,17 +4296,17 @@ Current datetime: {current_datetime.strftime('%A, %B %d, %Y %H:%M:%S')} ({curren
                     truncated_text = text[:max_local_len]
                     if len(text) > max_local_len:
                         logger.warning(f"Truncating text for local embedding model (>{max_local_len} chars): {text[:60]}...")
-                    
+
                     embedding_vector = local_model.encode(truncated_text, normalize_embeddings=True)
                 else:
                     logger.error("Local embedding provider configured, but model failed to load.")
                     self.error_counters["embedding_errors"] += 1 # Count as error
-            
+
             elif provider_type == "openai_compatible":
                 embedding_vector = await self._get_embedding_from_api(text)
                 if embedding_vector is None: # API call failed
                      self.error_counters["embedding_errors"] += 1 # Count as error
-            
+
             else:
                 logger.error(f"Invalid embedding_provider_type configured: {provider_type}")
                 self.error_counters["embedding_errors"] += 1 # Count as error
@@ -4323,7 +4332,7 @@ Current datetime: {current_datetime.strftime('%A, %B %d, %Y %H:%M:%S')} ({curren
                 embedding_vector = embedding_vector / norm
             else:
                 logger.warning("Generated embedding vector has near-zero norm. Cannot normalize.")
-            
+
             logger.debug(f"Generated embedding via {provider_type} in {end_time - start_time:.3f}s, dim: {embedding_vector.shape}")
             EMBEDDING_LATENCY.labels(provider).observe(time.perf_counter() - _embed_start)
             return embedding_vector
