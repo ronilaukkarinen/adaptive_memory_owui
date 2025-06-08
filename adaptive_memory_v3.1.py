@@ -1,3 +1,12 @@
+"""
+title: Adaptive Memory v3.1 - Advanced Memory System for OpenWebUI
+author: AG (original), improved by gramanoid, ronilaukkarinen
+description: Adaptive Memory is a sophisticated plugin that provides persistent, personalized memory capabilities for Large Language Models (LLMs) within OpenWebUI.
+repository_url: https://github.com/gramanoid/adaptive_memory_owui
+version: 3.1.1
+required_open_webui_version: >= 0.5.0
+"""
+
 import json
 import copy  # Add deepcopy import
 import traceback
